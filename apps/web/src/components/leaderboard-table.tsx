@@ -1,3 +1,12 @@
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
 type LeaderboardTableProps = {
   headers: string[];
   rows: string[][];
@@ -5,25 +14,25 @@ type LeaderboardTableProps = {
 
 export function LeaderboardTable({ headers, rows }: LeaderboardTableProps) {
   return (
-    <div className="table-wrap">
-      <table className="data-table">
-        <thead>
-          <tr>
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
             {headers.map((header) => (
-              <th key={header}>{header}</th>
+              <TableHead key={header}>{header}</TableHead>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {rows.map((row, index) => (
-            <tr key={`${row.join("-")}-${index}`}>
+            <TableRow key={`${row.join("-")}-${index}`}>
               {row.map((cell, cellIndex) => (
-                <td key={`${cell}-${cellIndex}`}>{cell}</td>
+                <TableCell key={`${cell}-${cellIndex}`}>{cell}</TableCell>
               ))}
-            </tr>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }

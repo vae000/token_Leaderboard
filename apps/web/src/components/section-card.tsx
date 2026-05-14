@@ -1,3 +1,5 @@
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
 type SectionCardProps = {
   title: string;
   subtitle: string;
@@ -9,21 +11,24 @@ type SectionCardProps = {
 
 export function SectionCard({ title, subtitle, items }: SectionCardProps) {
   return (
-    <section className="panel">
-      <div className="panel-header">
+    <Card>
+      <CardHeader>
         <div>
-          <p className="eyebrow">{subtitle}</p>
-          <h2>{title}</h2>
+          <CardDescription>{subtitle}</CardDescription>
+          <CardTitle>{title}</CardTitle>
         </div>
-      </div>
-      <div className="metric-list">
+      </CardHeader>
+      <CardContent className="space-y-3">
         {items.map((item) => (
-          <div key={`${item.label}-${item.value}`} className="metric-row">
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
+          <div
+            key={`${item.label}-${item.value}`}
+            className="flex items-center justify-between gap-4 rounded-2xl border border-sky-100 bg-white/65 px-4 py-3"
+          >
+            <span className="text-sm text-slate-600">{item.label}</span>
+            <strong className="text-sm font-semibold text-slate-900">{item.value}</strong>
           </div>
         ))}
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }

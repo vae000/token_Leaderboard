@@ -10,6 +10,7 @@ mod sync;
 use clap::{Parser, Subcommand};
 
 use crate::{
+    auth::{login, logout},
     sync::{daemon_status, start_daemon, stop_daemon},
 };
 
@@ -31,6 +32,15 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// 登录并获取 Web 登录凭证
+    Login {
+        #[arg(long, default_value = "u_demo")]
+        user_id: String,
+        #[arg(long, default_value = "Demo")]
+        name: String,
+    },
+    /// 清除本地登录状态
+    Logout,
     /// 启动后台守护进程，自动扫描所有工具并持续监控
     Start {
         /// 监控轮询间隔（秒）
@@ -60,6 +70,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     match cli.command {
+        Commands::Login { user_id, name } => {
+            login(&cli.api_base_url, &user_id, &name).await?;
+        }
+        Commands::Logout => {
+            logout()?;
+        }
         Commands::Start { interval_seconds } => {
             start_daemon(&cli.api_base_url, interval_seconds).await?;
         }

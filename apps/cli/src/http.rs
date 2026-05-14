@@ -1,7 +1,7 @@
 use anyhow::Context;
 use common::{
     AuthCallbackResponse, AuthStartResponse, BatchIngestRequest, BatchIngestResponse,
-    RefreshTokenRequest, RefreshTokenResponse,
+    GeneratedCredential, RefreshTokenRequest, RefreshTokenResponse,
 };
 use reqwest::Client;
 use serde_json::Value;
@@ -70,6 +70,21 @@ impl LeaderboardClient {
         self.client
             .post(format!("{}/v1/auth/cli/refresh", self.base_url))
             .json(request)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await
+            .map_err(Into::into)
+    }
+
+    /// 获取指定用户的 Web 登录凭证（账号 + 密码）。
+    pub async fn get_credentials(&self, user_id: &str) -> anyhow::Result<GeneratedCredential> {
+        self.client
+            .get(format!(
+                "{}/v1/admin/users/{}/credentials",
+                self.base_url, user_id
+            ))
             .send()
             .await?
             .error_for_status()?

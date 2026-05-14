@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, path::PathBuf, str::FromStr};
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -57,9 +57,9 @@ impl FromStr for ToolKind {
         match value {
             "codex" => Ok(Self::Codex),
             "cursor" => Ok(Self::Cursor),
-            "claude_code" => Ok(Self::ClaudeCode),
-            "opencode" => Ok(Self::OpenCode),
-            "deepseek_tui" => Ok(Self::DeepseekTui),
+            "claude_code" | "claude-code" => Ok(Self::ClaudeCode),
+            "opencode" | "open-code" => Ok(Self::OpenCode),
+            "deepseek_tui" | "deepseek-tui" => Ok(Self::DeepseekTui),
             _ => Err(format!("unsupported tool: {value}")),
         }
     }
@@ -117,6 +117,39 @@ pub struct AuthCallbackResponse {
     pub user_id: String,
     pub display_name: String,
     pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthenticatedUser {
+    pub user_id: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionResponse {
+    pub user: AuthenticatedUser,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PasswordLoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PasswordLoginResponse {
+    pub session_token: String,
+    pub user: AuthenticatedUser,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratedCredential {
+    pub user_id: String,
+    pub display_name: String,
+    pub username: String,
+    pub password: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -315,6 +348,14 @@ pub struct TeamMembershipImportRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminMutationResponse {
     pub updated_users: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanResult {
+    pub events: Vec<UsageEvent>,
+    pub next_cursors: BTreeMap<String, u64>,
+    pub discovered_files: usize,
+    pub log_dir: PathBuf,
 }
 
 #[cfg(test)]

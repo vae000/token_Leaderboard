@@ -23,9 +23,16 @@ corepack pnpm build
 - CLI 读取 `CLI_*`
 - Web 读取 `NEXT_PUBLIC_API_BASE_URL`
 
-## Codex 日志样例
+## 日志目录优先级
 
-CLI 的 `codex` adapter 读取 JSONL，支持字段：
+CLI 各 adapter 统一按以下优先级查找日志目录：
+
+1. `--log-dir` 参数
+2. 对应环境变量（`CLI_CODEX_LOG_DIR` / `CLI_DEEPSEEK_TUI_LOG_DIR`）
+3. `~/.deepseek/sessions/`（DeepSeek-TUI 默认数据目录，仅 dev 模式回退）
+4. `./sample-data/<tool-name>`（仅 dev 模式）
+
+## Codex 日志格式
 
 ```json
 {
@@ -38,8 +45,31 @@ CLI 的 `codex` adapter 读取 JSONL，支持字段：
 }
 ```
 
-默认日志目录优先级：
+## DeepSeek-TUI 日志格式
 
-1. `--log-dir`
-2. `CLI_CODEX_LOG_DIR`
-3. `./sample-data/codex`
+DeepSeek TUI 将会话数据保存在 `~/.deepseek/sessions/` 目录下，每个会话一个 `.json` 文件。
+
+```json
+{
+  "schema_version": 1,
+  "metadata": {
+    "id": "0951c6db-7da4-4b69-91b7-de55de22c957",
+    "title": "New Session",
+    "created_at": "2026-05-14T08:57:52.591430573Z",
+    "updated_at": "2026-05-14T09:21:21.684888990Z",
+    "message_count": 238,
+    "total_tokens": 6591962,
+    "model": "deepseek-v4-pro",
+    "workspace": "/home/vip/gp/workspace",
+    "mode": "yolo",
+    "cost": {
+      "session_cost_usd": 0.0,
+      "session_cost_cny": 0.0
+    }
+  },
+  "messages": [...],
+  "system_prompt": "..."
+}
+```
+
+CLI 读取 `metadata` 中的 `total_tokens`、`model`、`created_at`、`id` 生成使用事件。
