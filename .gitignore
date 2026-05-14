@@ -1,0 +1,10 @@
+/target
+/.DS_Store
+/.env
+/.env.local
+/.idea
+/.vscode
+/apps/web/.next
+/apps/web/node_modules
+/apps/web/pnpm-lock.yaml
+/apps/web/out
