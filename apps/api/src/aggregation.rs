@@ -423,10 +423,13 @@ pub fn me_overview(
     .map(|item| item.label.clone());
     let profile = repo.users.get(user_id).cloned().context("unknown user")?;
 
+    let team_name = repo.teams.get(&profile.team_id).map(|t| t.name.clone());
+
     Ok(MeOverviewResponse {
         generated_at: now,
         user_id: user_id.into(),
         display_name: profile.display_name,
+        team_name,
         total_tokens,
         total_cost_usd,
         request_count: events.len(),
@@ -601,6 +604,8 @@ fn assign_ranks<T>(rows: &mut [T], mut assign: impl FnMut(&mut T, usize)) {
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
+    use common::{ToolKind, UsageEvent};
+    use uuid::Uuid;
 
     use super::{QueryParams, dashboard_summary, resolve_window};
     use crate::repository::Repository;
@@ -623,8 +628,24 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_summary_uses_seed_data() {
-        let repo = Repository::new(true);
+    fn dashboard_summary_uses_repository_events() {
+        let mut repo = Repository::new();
+        repo.events.push(UsageEvent {
+            id: Uuid::new_v4(),
+            event_id: "evt_test_1".into(),
+            user_id: "u_demo".into(),
+            tool: ToolKind::Codex,
+            model: "gpt-5.5".into(),
+            occurred_at: Utc::now(),
+            input_tokens: 120,
+            output_tokens: 80,
+            cached_tokens: 20,
+            estimated_cost_usd: 0.01,
+            session_id: Some("sess_demo".into()),
+            source_file: "/tmp/demo.jsonl".into(),
+            source_offset: 1,
+            raw_hash: "hash_demo".into(),
+        });
         let summary = dashboard_summary(&repo, Utc::now());
         assert!(summary.total_tokens > 0);
         assert!(!summary.top_tools.is_empty());

@@ -42,6 +42,50 @@ pub async fn register_device(pool: &PgPool, device_id: &str) -> anyhow::Result<(
     Ok(())
 }
 
+/// 查询设备绑定的用户，未绑定时返回 None。
+pub async fn find_device_user(
+    pool: &PgPool,
+    device_id: &str,
+) -> anyhow::Result<Option<AuthenticatedUser>> {
+    let row = sqlx::query(
+        r#"
+        SELECT d.user_id, u.display_name
+        FROM devices d
+        JOIN users u ON u.id = d.user_id
+        WHERE d.id = $1 AND u.status = 'active'
+        "#,
+    )
+    .bind(device_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| AuthenticatedUser {
+        user_id: r.get("user_id"),
+        display_name: r.get("display_name"),
+    }))
+}
+
+/// 更新设备的 refresh_token。
+pub async fn update_device_tokens(
+    pool: &PgPool,
+    device_id: &str,
+    refresh_token: &str,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE devices
+        SET refresh_token = $2,
+            last_seen_at = NOW()
+        WHERE id = $1
+        "#,
+    )
+    .bind(device_id)
+    .bind(refresh_token)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn bind_device_user(
     pool: &PgPool,
     device_id: &str,
@@ -102,96 +146,6 @@ pub async fn refresh_device_token(
         access_token: format!("access_{}", uuid::Uuid::new_v4()),
         refresh_token: format!("refresh_{}", uuid::Uuid::new_v4()),
         expires_at: Utc::now() + Duration::hours(12),
-    })
-}
-
-pub async fn create_web_login_state(
-    pool: &PgPool,
-    state: &str,
-    return_to: &str,
-    expires_at: DateTime<Utc>,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        r#"
-        INSERT INTO web_login_states (state, return_to, expires_at)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (state) DO UPDATE
-        SET return_to = EXCLUDED.return_to,
-            expires_at = EXCLUDED.expires_at
-        "#,
-    )
-    .bind(state)
-    .bind(return_to)
-    .bind(expires_at)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn consume_web_login_state(pool: &PgPool, state: &str) -> anyhow::Result<String> {
-    let mut tx = pool.begin().await?;
-    let return_to = sqlx::query_scalar::<_, String>(
-        r#"
-        DELETE FROM web_login_states
-        WHERE state = $1
-          AND expires_at > NOW()
-        RETURNING return_to
-        "#,
-    )
-    .bind(state)
-    .fetch_optional(&mut *tx)
-    .await?
-    .context("invalid or expired wechat login state")?;
-    tx.commit().await?;
-    Ok(return_to)
-}
-
-pub async fn upsert_wechat_user(
-    pool: &PgPool,
-    openid: &str,
-    unionid: Option<&str>,
-    display_name: &str,
-) -> anyhow::Result<AuthenticatedUser> {
-    let existing_user_id = sqlx::query_scalar::<_, String>(
-        r#"
-        SELECT id
-        FROM users
-        WHERE ($1::text IS NOT NULL AND wechat_unionid = $1)
-           OR wechat_openid = $2
-        LIMIT 1
-        "#,
-    )
-    .bind(unionid)
-    .bind(openid)
-    .fetch_optional(pool)
-    .await?;
-
-    let user_id = existing_user_id.unwrap_or_else(|| {
-        let identifier = unionid.unwrap_or(openid);
-        format!("wx_{}", identifier)
-    });
-
-    sqlx::query(
-        r#"
-        INSERT INTO users (id, display_name, wechat_openid, wechat_unionid, status)
-        VALUES ($1, $2, $3, $4, 'active')
-        ON CONFLICT (id) DO UPDATE
-        SET display_name = EXCLUDED.display_name,
-            wechat_openid = EXCLUDED.wechat_openid,
-            wechat_unionid = COALESCE(EXCLUDED.wechat_unionid, users.wechat_unionid),
-            updated_at = NOW()
-        "#,
-    )
-    .bind(&user_id)
-    .bind(display_name)
-    .bind(openid)
-    .bind(unionid)
-    .execute(pool)
-    .await?;
-
-    Ok(AuthenticatedUser {
-        user_id,
-        display_name: display_name.into(),
     })
 }
 
@@ -318,17 +272,6 @@ pub async fn ingest_events(
             });
             continue;
         }
-
-        sqlx::query(
-            r#"
-            INSERT INTO users (id, display_name, status)
-            VALUES ($1, $1, 'active')
-            ON CONFLICT (id) DO NOTHING
-            "#,
-        )
-        .bind(&event.user_id)
-        .execute(&mut *tx)
-        .await?;
 
         let pricing_key = (
             event.model.clone(),
@@ -963,9 +906,13 @@ pub async fn me_overview(
 
     let profile = sqlx::query(
         r#"
-        SELECT display_name
-        FROM users
-        WHERE id = $1
+        SELECT u.display_name, t.name AS team_name
+        FROM users u
+        LEFT JOIN user_team_memberships utm
+          ON utm.user_id = u.id
+         AND (utm.effective_to IS NULL OR utm.effective_to > CURRENT_TIMESTAMP)
+        LEFT JOIN teams t ON t.id = utm.team_id
+        WHERE u.id = $1
         "#,
     )
     .bind(user_id)
@@ -1034,6 +981,7 @@ pub async fn me_overview(
         generated_at: now,
         user_id: user_id.into(),
         display_name: profile.get("display_name"),
+        team_name: profile.try_get("team_name").unwrap_or(None),
         total_tokens: to_u64(aggregates.get::<i64, _>("total_tokens")),
         total_cost_usd: aggregates.get("total_cost_usd"),
         request_count: to_usize(aggregates.get::<i64, _>("request_count")),

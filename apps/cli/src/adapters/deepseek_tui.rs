@@ -116,13 +116,11 @@ pub fn resolve_log_dir(explicit: Option<PathBuf>) -> anyhow::Result<PathBuf> {
 
 /// Returns the deepseek TUI data directory (`~/.deepseek`)
 fn dirs_data_dir() -> Option<PathBuf> {
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok()?;
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
     let path = PathBuf::from(home).join(".deepseek");
-    if path.exists() {
-        Some(path)
-    } else {
-        None
-    }
+    if path.exists() { Some(path) } else { None }
 }
 
 fn discover_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
@@ -166,7 +164,9 @@ fn make_event(user_id: &str, file: &Path, session: &SessionFile) -> anyhow::Resu
     // DeepSeek API typical ratio: ~65% input, ~30% output, ~5% cached.
     let input_tokens = (meta.total_tokens as f64 * 0.65) as u64;
     let output_tokens = (meta.total_tokens as f64 * 0.30) as u64;
-    let cached_tokens = meta.total_tokens.saturating_sub(input_tokens + output_tokens);
+    let cached_tokens = meta
+        .total_tokens
+        .saturating_sub(input_tokens + output_tokens);
 
     // Use cost from metadata, or estimate if unavailable
     let estimated_cost_usd = meta
@@ -206,7 +206,8 @@ mod tests {
 
     #[test]
     fn parses_session_json() {
-        let dir = std::env::temp_dir().join(format!("token_leaderboard_dstest_{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("token_leaderboard_dstest_{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).expect("create dir");
         let file = dir.join("session.json");
         fs::write(
@@ -236,9 +237,17 @@ mod tests {
         let result = scan("u_demo", Some(dir.clone()), &BTreeMap::new()).expect("scan");
         assert_eq!(result.events.len(), 1);
         assert_eq!(result.events[0].model, "deepseek-v4-pro");
-        assert_eq!(result.events[0].session_id.as_deref(), Some("test-session-1"));
+        assert_eq!(
+            result.events[0].session_id.as_deref(),
+            Some("test-session-1")
+        );
         assert!(result.events[0].total_tokens() <= 100000);
-        assert!(result.events[0].input_tokens + result.events[0].output_tokens + result.events[0].cached_tokens >= 99000);
+        assert!(
+            result.events[0].input_tokens
+                + result.events[0].output_tokens
+                + result.events[0].cached_tokens
+                >= 99000
+        );
         assert!(result.events[0].input_tokens > 0);
         assert!(result.events[0].output_tokens > 0);
 
@@ -247,7 +256,10 @@ mod tests {
 
     #[test]
     fn skips_unmodified_files() {
-        let dir = std::env::temp_dir().join(format!("token_leaderboard_dstest2_{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!(
+            "token_leaderboard_dstest2_{}",
+            uuid::Uuid::new_v4()
+        ));
         fs::create_dir_all(&dir).expect("create dir");
         let file = dir.join("session.json");
         fs::write(
@@ -258,7 +270,10 @@ mod tests {
 
         let meta = fs::metadata(&file).expect("metadata");
         let mtime = meta.modified().expect("mtime");
-        let nanos = mtime.duration_since(std::time::UNIX_EPOCH).expect("epoch").as_nanos() as u64;
+        let nanos = mtime
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("epoch")
+            .as_nanos() as u64;
 
         let mut cursors = BTreeMap::new();
         cursors.insert(file.display().to_string(), nanos);

@@ -5,17 +5,17 @@ use axum::{
     Json, Router,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Response},
     routing::{get, post, put},
 };
 use chrono::{Duration, Utc};
 use common::{
-    AdminMutationResponse, AuthCallbackResponse, AuthStartResponse, BatchIngestRequest,
-    DashboardSummary, GeneratedCredential, LeaderboardResponse, MeDistributionResponse,
-    MeOverviewResponse, MeTrendResponse, ModelLeaderboardRow, PasswordLoginRequest,
-    PasswordLoginResponse, RefreshTokenRequest, RefreshTokenResponse, RewardsResponse,
-    TeamLeaderboardRow, TeamMembershipImportRequest, ToolLeaderboardRow, UserLeaderboardRow,
-    UserProfile, WebSessionResponse,
+    AdminMutationResponse, AuthCallbackResponse, AuthStartRequest, AuthStartResponse,
+    BatchIngestRequest, DashboardSummary, GeneratedCredential, LeaderboardResponse,
+    MeDistributionResponse, MeOverviewResponse, MeTrendResponse, ModelLeaderboardRow,
+    PasswordLoginRequest, PasswordLoginResponse, RefreshTokenRequest, RefreshTokenResponse,
+    RewardsResponse, TeamLeaderboardRow, TeamMembershipImportRequest, ToolLeaderboardRow,
+    UserLeaderboardRow, UserProfile, WebSessionResponse,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -34,7 +34,6 @@ use crate::{
     config::AppConfig,
     local_auth, postgres, pricing,
     repository::Repository,
-    wechat::{self, WechatConfig},
 };
 
 #[derive(Clone)]
@@ -76,8 +75,6 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/auth/cli/callback", get(auth_callback))
         .route("/v1/auth/cli/refresh", post(auth_refresh))
         .route("/v1/auth/web/login", post(web_password_login))
-        .route("/v1/auth/wechat/start", get(wechat_start))
-        .route("/v1/auth/wechat/callback", get(wechat_callback))
         .route("/v1/auth/web/me", get(web_auth_me))
         .route("/v1/auth/web/logout", post(web_auth_logout))
         .route("/v1/ingest/events:batch", post(ingest_batch))
@@ -116,8 +113,16 @@ async fn healthz(State(state): State<AppState>) -> Json<serde_json::Value> {
     }))
 }
 
-async fn auth_start(State(state): State<AppState>) -> Result<Json<AuthStartResponse>, AppError> {
-    let device_id = format!("dev_{}", Uuid::new_v4());
+async fn auth_start(
+    State(state): State<AppState>,
+    Json(request): Json<AuthStartRequest>,
+) -> Result<Json<AuthStartResponse>, AppError> {
+    let device_id = request.device_id.trim().to_string();
+    if device_id.is_empty() {
+        return Err(AppError::bad_request("device_id is required"));
+    }
+
+    // 注册设备（如已存在则忽略）
     if let Some(pool) = &state.pool {
         postgres::register_device(pool, &device_id).await?;
     } else {
@@ -128,15 +133,60 @@ async fn auth_start(State(state): State<AppState>) -> Result<Json<AuthStartRespo
             .register_device(device_id.clone());
     }
 
+    // 检查设备是否已绑定用户
+    if let Some(pool) = &state.pool {
+        if let Some(user) = postgres::find_device_user(pool, &device_id).await? {
+            let access_token = format!("access_{}", Uuid::new_v4());
+            let refresh_token = format!("refresh_{}", Uuid::new_v4());
+            let expires_at = Utc::now() + Duration::hours(12);
+            // 更新设备 token
+            postgres::update_device_tokens(pool, &device_id, &refresh_token).await?;
+            return Ok(Json(AuthStartResponse {
+                device_id: device_id.clone(),
+                login_url: String::new(),
+                poll_after_seconds: 0,
+                bound_user: Some(user),
+                access_token: Some(access_token),
+                refresh_token: Some(refresh_token),
+                expires_at: Some(expires_at),
+            }));
+        }
+    } else {
+        let repo = state.repository.read().await;
+        if let Some(user_id) = repo.devices.get(&device_id).cloned() {
+            if !user_id.is_empty() {
+                let user = repo.users.get(&user_id).map(|p| common::AuthenticatedUser {
+                    user_id: p.user_id.clone(),
+                    display_name: p.display_name.clone(),
+                });
+                if let Some(user) = user {
+                    return Ok(Json(AuthStartResponse {
+                        device_id: device_id.clone(),
+                        login_url: String::new(),
+                        poll_after_seconds: 0,
+                        bound_user: Some(user),
+                        access_token: Some(format!("access_{}", Uuid::new_v4())),
+                        refresh_token: Some(format!("refresh_{}", Uuid::new_v4())),
+                        expires_at: Some(Utc::now() + Duration::hours(12)),
+                    }));
+                }
+            }
+        }
+    }
+
     let login_url = format!(
         "{}/login?device_id={device_id}",
         state.config.web_base_url.trim_end_matches('/'),
     );
 
     Ok(Json(AuthStartResponse {
-        device_id: device_id.clone(),
+        device_id,
         login_url,
         poll_after_seconds: 3,
+        bound_user: None,
+        access_token: None,
+        refresh_token: None,
+        expires_at: None,
     }))
 }
 
@@ -224,64 +274,6 @@ async fn web_password_login(
         user,
         expires_at,
     }))
-}
-
-#[derive(Debug, Deserialize)]
-struct WechatStartQuery {
-    return_to: Option<String>,
-}
-
-async fn wechat_start(
-    State(state): State<AppState>,
-    Query(query): Query<WechatStartQuery>,
-) -> Result<Redirect, AppError> {
-    let pool = require_pool(&state)?;
-    let wechat = wechat_config(&state.config)?;
-    let state_token = Uuid::new_v4().to_string();
-    let expires_at = Utc::now() + Duration::minutes(10);
-    let return_to = normalize_return_to(query.return_to.as_deref());
-
-    postgres::create_web_login_state(pool, &state_token, &return_to, expires_at).await?;
-    let redirect_url = wechat::build_qr_connect_url(&wechat, &state_token)?;
-    Ok(Redirect::temporary(&redirect_url))
-}
-
-#[derive(Debug, Deserialize)]
-struct WechatCallbackQuery {
-    code: Option<String>,
-    state: Option<String>,
-}
-
-async fn wechat_callback(
-    State(state): State<AppState>,
-    Query(query): Query<WechatCallbackQuery>,
-) -> Result<Redirect, AppError> {
-    let pool = require_pool(&state)?;
-    let wechat = wechat_config(&state.config)?;
-    let state_token = query.state.context("missing wechat state")?;
-    let code = query.code.context("missing wechat code")?;
-    let return_to = postgres::consume_web_login_state(pool, &state_token).await?;
-    let client = reqwest::Client::new();
-    let wechat_user = wechat::fetch_user_info(&client, &wechat, &code).await?;
-    let user = postgres::upsert_wechat_user(
-        pool,
-        &wechat_user.openid,
-        wechat_user.unionid.as_deref(),
-        &wechat_user.nickname,
-    )
-    .await?;
-    let expires_at = Utc::now() + Duration::hours(state.config.web_session_ttl_hours as i64);
-    let session_token = postgres::create_web_session(pool, &user.user_id, expires_at).await?;
-    let mut redirect_url = url::Url::parse(&format!(
-        "{}/auth/callback",
-        state.config.web_base_url.trim_end_matches('/')
-    ))
-    .context("invalid API__WEB_BASE_URL")?;
-    redirect_url
-        .query_pairs_mut()
-        .append_pair("session_token", &session_token)
-        .append_pair("next", &return_to);
-    Ok(Redirect::temporary(redirect_url.as_ref()))
 }
 
 async fn web_auth_me(
@@ -546,35 +538,6 @@ fn require_pool(state: &AppState) -> Result<&PgPool, AppError> {
         .pool
         .as_ref()
         .ok_or_else(|| AppError::bad_request("postgres storage is required"))
-}
-
-fn wechat_config(config: &AppConfig) -> Result<WechatConfig, AppError> {
-    let app_id = config
-        .wechat_app_id
-        .clone()
-        .context("API__WECHAT_APP_ID is required for wechat login")?;
-    let app_secret = config
-        .wechat_app_secret
-        .clone()
-        .context("API__WECHAT_APP_SECRET is required for wechat login")?;
-    Ok(WechatConfig {
-        app_id,
-        app_secret,
-        redirect_uri: format!(
-            "{}/v1/auth/wechat/callback",
-            config.public_base_url.trim_end_matches('/')
-        ),
-    })
-}
-
-fn normalize_return_to(return_to: Option<&str>) -> String {
-    let Some(value) = return_to else {
-        return "/me".into();
-    };
-    if value.starts_with('/') && !value.starts_with("//") {
-        return value.into();
-    }
-    "/me".into()
 }
 
 fn session_token_from_headers(headers: &HeaderMap) -> Result<String, AppError> {

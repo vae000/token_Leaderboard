@@ -24,13 +24,21 @@ export function LeaderboardTable({ headers, rows }: LeaderboardTableProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row, index) => (
-            <TableRow key={`${row.join("-")}-${index}`}>
-              {row.map((cell, cellIndex) => (
-                <TableCell key={`${cell}-${cellIndex}`}>{cell}</TableCell>
-              ))}
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={headers.length} className="text-center py-12 text-slate-500">
+                暂无排行数据
+              </TableCell>
             </TableRow>
-          ))}
+          ) : (
+            rows.map((row, index) => (
+              <TableRow key={`${row.join("-")}-${index}`}>
+                {row.map((cell, cellIndex) => (
+                  <TableCell key={`${cell}-${cellIndex}`}>{cell}</TableCell>
+                ))}
+              </TableRow>
+            ))
+          )}
         </TableBody>
       </Table>
     </div>

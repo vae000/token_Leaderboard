@@ -5,7 +5,6 @@ mod postgres;
 mod pricing;
 mod repository;
 mod routes;
-mod wechat;
 
 use std::net::SocketAddr;
 
@@ -25,7 +24,13 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../db/migrations")
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
+    let bj_offset = time::UtcOffset::from_hms(8, 0, 0).expect("+08:00");
+    let bj_format = time::format_description::parse(
+        "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3][offset_hour sign:mandatory]:[offset_minute]",
+    ).expect("valid format");
+    let beijing_timer = tracing_subscriber::fmt::time::OffsetTime::new(bj_offset, bj_format);
     tracing_subscriber::fmt()
+        .with_timer(beijing_timer)
         .with_env_filter(
             EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| EnvFilter::new("api=info,tower_http=info")),
@@ -45,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
             Err(error) => warn!("failed to refresh model catalog from official sources: {error}"),
         }
     }
-    let repository = Repository::new(config.seed_demo_data);
+    let repository = Repository::new();
     let state = AppState::new(config.clone(), pool, repository);
     let app = router(state);
     let addr: SocketAddr = format!("{}:{}", config.host, config.port)
@@ -68,6 +73,7 @@ async fn connect_database(database_url: Option<&str>) -> anyhow::Result<Option<P
         anyhow::bail!("API__DATABASE_URL is required; in-memory mode has been disabled");
     };
 
+    ensure_database_exists(database_url).await?;
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(database_url)
@@ -77,6 +83,44 @@ async fn connect_database(database_url: Option<&str>) -> anyhow::Result<Option<P
     MIGRATOR.run(&pool).await?;
     info!("database connection established and migrations applied");
     Ok(Some(pool))
+}
+
+async fn ensure_database_exists(database_url: &str) -> anyhow::Result<()> {
+    let Some(database_name) = extract_database_name(database_url) else {
+        return Ok(());
+    };
+    if database_name == "postgres" {
+        return Ok(());
+    }
+
+    let admin_database_url = build_admin_database_url(database_url)?;
+    let admin_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&admin_database_url)
+        .await
+        .with_context(
+            || "failed to connect to admin postgres database while ensuring target database exists",
+        )?;
+
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)",
+    )
+    .bind(&database_name)
+    .fetch_optional(&admin_pool)
+    .await
+    .with_context(|| format!("failed to check whether database `{database_name}` exists"))?;
+
+    if exists.unwrap_or(false) {
+        return Ok(());
+    }
+
+    let statement = format!("CREATE DATABASE {}", quote_identifier(&database_name));
+    admin_pool
+        .execute(statement.as_str())
+        .await
+        .with_context(|| format!("failed to create database `{database_name}`"))?;
+    info!("created database `{database_name}`");
+    Ok(())
 }
 
 async fn ensure_schema(pool: &PgPool, database_url: &str) -> anyhow::Result<()> {
@@ -90,6 +134,22 @@ async fn ensure_schema(pool: &PgPool, database_url: &str) -> anyhow::Result<()> 
         .with_context(|| format!("failed to ensure schema `{schema}`"))?;
     info!("ensured schema `{schema}` exists");
     Ok(())
+}
+
+fn extract_database_name(database_url: &str) -> Option<String> {
+    let url = Url::parse(database_url).ok()?;
+    let database_name = url.path().trim_start_matches('/').trim();
+    if database_name.is_empty() {
+        None
+    } else {
+        Some(database_name.to_owned())
+    }
+}
+
+fn build_admin_database_url(database_url: &str) -> anyhow::Result<String> {
+    let mut url = Url::parse(database_url).with_context(|| "invalid database url")?;
+    url.set_path("/postgres");
+    Ok(url.to_string())
 }
 
 fn extract_target_schema(database_url: &str) -> Option<String> {
@@ -130,7 +190,27 @@ fn quote_identifier(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_target_schema, parse_search_path_option, quote_identifier};
+    use super::{
+        build_admin_database_url, extract_database_name, extract_target_schema,
+        parse_search_path_option, quote_identifier,
+    };
+
+    #[test]
+    fn extracts_database_name_from_database_url() {
+        let database_url =
+            "postgres://postgres:pass@localhost:5432/token?options=-csearch_path%3Dtoken%2Cpublic";
+        assert_eq!(extract_database_name(database_url), Some("token".into()));
+    }
+
+    #[test]
+    fn builds_admin_database_url() {
+        let database_url =
+            "postgres://postgres:pass@localhost:5432/token?options=-csearch_path%3Dtoken%2Cpublic";
+        assert_eq!(
+            build_admin_database_url(database_url).expect("admin url"),
+            "postgres://postgres:pass@localhost:5432/postgres?options=-csearch_path%3Dtoken%2Cpublic"
+        );
+    }
 
     #[test]
     fn extracts_schema_from_search_path_option() {

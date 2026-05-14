@@ -32,12 +32,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// 登录并获取 Web 登录凭证
+    /// 登录（以本机 MAC 地址作为设备标识，自动派生 user_id）
     Login {
-        #[arg(long, default_value = "u_demo")]
-        user_id: String,
-        #[arg(long, default_value = "Demo")]
-        name: String,
+        /// 显示名称（可选，默认使用自动生成的 user_id）
+        #[arg(long)]
+        name: Option<String>,
     },
     /// 清除本地登录状态
     Logout,
@@ -70,8 +69,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     match cli.command {
-        Commands::Login { user_id, name } => {
-            login(&cli.api_base_url, &user_id, &name).await?;
+        Commands::Login { name } => {
+            login(&cli.api_base_url, name.as_deref()).await?;
         }
         Commands::Logout => {
             logout()?;

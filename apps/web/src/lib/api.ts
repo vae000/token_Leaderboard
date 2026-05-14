@@ -1,5 +1,12 @@
-const API_BASE_URL =
+const PUBLIC_API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
+
+const INTERNAL_API_BASE_URL =
+  process.env.API_INTERNAL_BASE_URL ?? PUBLIC_API_BASE_URL;
+
+function getApiBaseUrl(): string {
+  return typeof window === "undefined" ? INTERNAL_API_BASE_URL : PUBLIC_API_BASE_URL;
+}
 
 type MetricBreakdown = {
   label: string;
@@ -91,6 +98,7 @@ export type MeOverview = {
   generated_at: string;
   user_id: string;
   display_name: string;
+  team_name: string | null;
   total_tokens: number;
   total_cost_usd: number;
   request_count: number;
@@ -118,7 +126,7 @@ export type MeRewards = {
 };
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -176,3 +184,31 @@ export async function getMeTrend(userId: string): Promise<MeTrend> {
 export async function getMeRewards(userId: string): Promise<MeRewards> {
   return fetchJson(`/v1/me/rewards?user_id=${userId}`);
 }
+
+export async function assignUserTeam(
+  userId: string,
+  teamId: string,
+  teamName: string,
+  sessionToken?: string,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  if (sessionToken) {
+    headers["x-session-token"] = sessionToken;
+  }
+
+  const apiBaseUrl = getApiBaseUrl();
+  const response = await fetch(`${apiBaseUrl}/v1/admin/users/${encodeURIComponent(userId)}/team`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ team_id: teamId, team_name: teamName }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`request failed with ${response.status}`);
+  }
+}
+
+export type { TeamRow };

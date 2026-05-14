@@ -6,18 +6,25 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, bail};
-use chrono::Utc;
+use anyhow::Context;
+use chrono::{FixedOffset, Utc};
 use common::{BatchIngestRequest, ToolKind};
 use tokio::time::sleep;
 
 use crate::{
-    adapters::codex, adapters::deepseek_tui, config::{state_dir, CliState},
+    adapters::{claude_code, codex, cursor, deepseek_tui, opencode},
+    config::{CliState, state_dir},
     http::LeaderboardClient,
 };
 
 /// 当前已实现适配器的工具列表。
-const SUPPORTED_TOOLS: &[ToolKind] = &[ToolKind::Codex, ToolKind::DeepseekTui];
+const SUPPORTED_TOOLS: &[ToolKind] = &[
+    ToolKind::Codex,
+    ToolKind::Cursor,
+    ToolKind::ClaudeCode,
+    ToolKind::OpenCode,
+    ToolKind::DeepseekTui,
+];
 
 // ─── 守护进程管理 ───────────────────────────────────────
 
@@ -57,6 +64,10 @@ pub async fn start_daemon(api_base_url: &str, interval_seconds: u64) -> anyhow::
         .context("failed to spawn daemon process")?;
 
     let pid = child.id();
+    if let Some(parent) = pid_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
     fs::write(&pid_path, pid.to_string())
         .with_context(|| format!("failed to write PID file {}", pid_path.display()))?;
 
@@ -142,7 +153,13 @@ pub fn daemon_status() -> anyhow::Result<()> {
         "上次同步: {}",
         state
             .last_sync_at
-            .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+            .map(|t| {
+                use chrono::FixedOffset;
+                let bj = FixedOffset::east_opt(8 * 3600).expect("+08:00");
+                t.with_timezone(&bj)
+                    .format("%Y-%m-%d %H:%M:%S CST")
+                    .to_string()
+            })
             .unwrap_or_else(|| "从未".into())
     );
 
@@ -168,9 +185,10 @@ fn read_pid(path: &Path) -> anyhow::Result<Option<u32>> {
     }
     let content = fs::read_to_string(path)
         .with_context(|| format!("failed to read PID file {}", path.display()))?;
-    let pid: u32 = content.trim().parse().map_err(|e| {
-        anyhow::anyhow!("invalid PID in {}: {e}", path.display())
-    })?;
+    let pid: u32 = content
+        .trim()
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid PID in {}: {e}", path.display()))?;
     Ok(Some(pid))
 }
 
@@ -186,9 +204,22 @@ fn is_process_alive(pid: u32) -> bool {
 
 // ─── 守护进程循环 ───────────────────────────────────────
 
+/// 返回格式化的北京时间时间戳。
+fn beijing_ts() -> String {
+    let now = Utc::now();
+    let bj = FixedOffset::east_opt(8 * 3600).expect("+08:00");
+    now.with_timezone(&bj)
+        .format("%Y-%m-%dT%H:%M:%S%.3f%:z")
+        .to_string()
+}
+
 /// 守护进程主循环（由 `--daemon` 隐藏参数启动的子进程运行）。
 pub async fn run_daemon(api_base_url: &str) -> anyhow::Result<()> {
-    println!("daemon child started (pid {})", std::process::id());
+    println!(
+        "{} [daemon] child started (pid {})",
+        beijing_ts(),
+        std::process::id()
+    );
 
     let interval_seconds = std::env::var("CLI_SYNC_INTERVAL_SECONDS")
         .ok()
@@ -199,13 +230,13 @@ pub async fn run_daemon(api_base_url: &str) -> anyhow::Result<()> {
         match run_sync_all(api_base_url).await {
             Ok(()) => {}
             Err(e) => {
-                eprintln!("[daemon] sync failed: {e:#}");
+                eprintln!("{} [daemon] sync failed: {e:#}", beijing_ts());
             }
         }
 
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
-                println!("[daemon] received SIGTERM, exiting");
+                println!("{} [daemon] received SIGTERM, exiting", beijing_ts());
                 break;
             }
             _ = sleep(Duration::from_secs(interval_seconds)) => {}
@@ -246,7 +277,7 @@ async fn run_sync_all(api_base_url: &str) -> anyhow::Result<()> {
 
     for &tool in SUPPORTED_TOOLS {
         let result = scan_tool(tool, &user_id, &state.upload_cursors)
-            .map_err(|e| eprintln!("[{tool}] scan failed: {e:#}"))
+            .map_err(|e| eprintln!("{} [{tool}] scan failed: {e:#}", beijing_ts()))
             .ok();
 
         let Some(result) = result else {
@@ -254,7 +285,11 @@ async fn run_sync_all(api_base_url: &str) -> anyhow::Result<()> {
         };
 
         if result.events.is_empty() {
-            println!("[{tool}] no new events found in {}", result.log_dir.display());
+            println!(
+                "{} [{tool}] no new events in {}",
+                beijing_ts(),
+                result.log_dir.display()
+            );
             continue;
         }
 
@@ -271,7 +306,8 @@ async fn run_sync_all(api_base_url: &str) -> anyhow::Result<()> {
                 })
                 .await?;
             println!(
-                "[{tool}] uploaded accepted={} deduped={} rejected={}",
+                "{} [{tool}] uploaded accepted={} deduped={} rejected={}",
+                beijing_ts(),
                 response.accepted,
                 response.deduped,
                 response.rejected.len()
@@ -289,7 +325,8 @@ async fn run_sync_all(api_base_url: &str) -> anyhow::Result<()> {
 
     if total_events > 0 {
         println!(
-            "sync complete: {total_events} events from {total_files} file(s) across {} tool(s)",
+            "{} sync complete: {total_events} events from {total_files} file(s) across {} tool(s)",
+            beijing_ts(),
             SUPPORTED_TOOLS.len()
         );
     }
@@ -305,8 +342,10 @@ fn scan_tool(
 ) -> anyhow::Result<common::ScanResult> {
     match tool {
         ToolKind::Codex => codex::scan(user_id, None, cursors),
+        ToolKind::Cursor => cursor::scan(user_id, None, cursors),
+        ToolKind::ClaudeCode => claude_code::scan(user_id, None, cursors),
+        ToolKind::OpenCode => opencode::scan(user_id, None, cursors),
         ToolKind::DeepseekTui => deepseek_tui::scan(user_id, None, cursors),
-        other => bail!("{other} adapter has not been implemented yet"),
     }
 }
 

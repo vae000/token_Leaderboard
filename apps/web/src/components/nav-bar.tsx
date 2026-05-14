@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 type CurrentUser = {
@@ -27,20 +26,9 @@ export function NavBar({ currentUser }: { currentUser: CurrentUser }) {
     <header className="nav-shell">
       <div className="nav">
         <Link className="nav-brand" href="/">
-          <Badge className="w-fit">AI 指挥中心</Badge>
-          <div className="nav-brand-row">
-            <div className="brand-cluster" aria-hidden="true">
-              <span className="brand-grid" />
-              <span className="brand-ring brand-ring-outer" />
-              <span className="brand-ring brand-ring-inner" />
-              <span className="brand-core" />
-              <span className="brand-beam" />
-            </div>
-            <div className="nav-brand-copy">
-              <span>Token 榜单</span>
-              <strong>企业级 AI 使用驾驶舱</strong>
-            </div>
-          </div>
+          <span className="text-xl font-semibold tracking-[-0.03em] text-slate-900">
+            Token 榜单
+          </span>
         </Link>
         <nav className="nav-links">
           {items.map((item) => (

@@ -1,0 +1,55 @@
+# ── Token Leaderboard ──────────────────────────────────────
+# 一键启动: docker compose up -d
+# ──────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/postgres:15-alpine
+    environment:
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: token
+    ports:
+      - "45434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d token"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      API__DB_HOST: postgres
+      API__DB_PORT: "5432"
+      API__DB_USER: postgres
+      API__DB_PASSWORD: "123456"
+      API__DB_NAME: token
+      API__DB_SCHEMA: token
+      API__CORS_ALLOW_ORIGIN: http://localhost:3000
+      API__AUTO_PASSWORD_SALT: compose-local-salt
+      API__REFRESH_MODEL_CATALOG_ON_STARTUP: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      API_INTERNAL_BASE_URL: http://api:8080
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

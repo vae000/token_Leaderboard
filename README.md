@@ -1,117 +1,125 @@
 # Token Leaderboard
 
-`plan.md` 中的执行计划已经落成一个可运行的 monorepo MVP，包含：
+一个用于汇总 AI 工具 Token 使用量的 monorepo：
 
-- `apps/cli`: Rust CLI 守护进程，支持 `start/stop/restart/status`
-- `apps/api`: Rust + Axum API，提供认证骨架、事件 ingest、聚合查询、管理接口骨架
-- `apps/web`: Next.js App Router 前端，包含 Dashboard、排行榜、个人页
-- `crates/common`: CLI/API 共用模型
-- `db/migrations`: PostgreSQL schema 与初始化数据
-- `docs`: 架构与开发说明
+- `apps/api`: Rust + Axum API
+- `apps/cli`: Rust 本地采集守护进程
+- `apps/web`: Next.js Web 面板
+- `crates/common`: 共用模型
+- `db/migrations`: PostgreSQL 迁移
 
-## 本地启动
+当前以**真实数据采集**为主，不使用种子数据。
 
-### 1. API
+## 快速启动
+
+推荐直接用 Docker：
+
+```bash
+docker compose up -d --build
+```
+
+启动后访问：
+
+- Web: `http://localhost:3000`
+- API: `http://localhost:8080`
+
+说明：
+
+- API 镜像编译时会内嵌 `db/migrations`，构建上下文必须是仓库根目录。
+- Web 容器内部通过 `API_INTERNAL_BASE_URL=http://api:8080` 访问 API。
+- 浏览器访问 API 使用 `NEXT_PUBLIC_API_BASE_URL=http://localhost:8080`。
+
+## 本地开发
+
+### API
 
 ```bash
 cargo run -p api
 ```
 
-默认监听 `http://127.0.0.1:8080`。未配置 PostgreSQL 时会使用内存仓库运行；配置 `API__DATABASE_URL` 后会自动执行 `db/migrations`。
+行为：
 
-### 2. CLI 守护进程
-
-CLI 以守护进程方式运行，启动后自动扫描所有支持的工具日志并持续监控。
-
-```bash
-# 启动守护进程（后台运行，自动扫描 Codex + DeepSeek-TUI）
-cargo run -p cli -- start
-
-# 查看状态
-cargo run -p cli -- status
-
-# 重启
-cargo run -p cli -- restart
-
-# 停止
-cargo run -p cli -- stop
-```
-
-守护进程默认每 60 秒轮询一次，可通过 `--interval-seconds` 或 `CLI_SYNC_INTERVAL_SECONDS` 调整间隔。
-
-支持自动扫描的工具：
-
-- **Codex** — 扫描本地 `.jsonl` 日志（默认 `sample-data/codex`）
-- **DeepSeek-TUI** — 扫描 `~/.deepseek/sessions/*.json`
-- Cursor、Claude Code、OpenCode 接口已预留，适配器待实现
-
-PID 文件与状态配置文件均写入用户配置目录下的 `token-leaderboard/leaderboard/`。
-
-### 3. Web
-
-```bash
-cd apps/web
-corepack pnpm install
-corepack pnpm dev
-```
-
-默认访问 `http://127.0.0.1:3000`，服务端会优先读取 `NEXT_PUBLIC_API_BASE_URL` 指向的 API。
-
-## 构建
-
-所有组件均在项目根目录下用 Cargo 或 pnpm 构建。
+- 读取 `API__DATABASE_URL`，或用 `API__DB_*` 自动拼接连接串
+- 若目标库不存在，会先连接 `postgres` 库执行 `CREATE DATABASE`
+- 然后自动建 schema 并执行 `db/migrations`
 
 ### CLI
 
-```bash
-# Debug 构建
-cargo build -p cli
-
-# Release 构建（优化，推荐分发）
-cargo build -p cli --release
-```
-
-产物：`target/debug/cli` 或 `target/release/cli`，单二进制文件，无外部运行时依赖。
-
-### API
+首次登录并启动守护进程：
 
 ```bash
-cargo build -p api --release
+cargo run -p cli -- login
+cargo run -p cli -- start
 ```
 
-产物：`target/release/api`。
+常用命令：
+
+```bash
+cargo run -p cli -- status
+cargo run -p cli -- restart
+cargo run -p cli -- stop
+```
+
+如果是本机直接运行二进制，API 地址写 `localhost` 没问题：
+
+```bash
+./target/release/leaderboard --api-base-url http://localhost:8080 restart
+```
+
+已接入的真实日志源：
+
+- `Codex`: `~/.codex/sessions/`
+- `Claude Code`: `~/.claude/projects/**/*.jsonl`
+- `DeepSeek-TUI`: `~/.deepseek/sessions/*.json`
+
+`Cursor` 和 `OpenCode` 适配器仍在完善中。
 
 ### Web
 
 ```bash
 cd apps/web
-corepack pnpm install
-corepack pnpm build
+corepack pnpm dev
 ```
 
-产物在 `apps/web/.next` 目录，通过 `corepack pnpm start` 启动生产服务。
+## 关键环境变量
 
-## Web 登录配置
+只列常用项：
 
-当前 Web 侧使用本地账号密码登录，启动前建议补齐以下环境变量：
+| 变量 | 说明 |
+|------|------|
+| `API__DB_HOST` / `API__DB_PORT` / `API__DB_USER` / `API__DB_PASSWORD` / `API__DB_NAME` | PostgreSQL 连接参数 |
+| `API__DATABASE_URL` | 完整数据库连接串，优先级高于拆分变量 |
+| `API__DB_SCHEMA` | schema，默认使用 `token` |
+| `API__AUTO_PASSWORD_SALT` | Web 登录密码盐值 |
+| `API__WEB_BASE_URL` | Web 外部地址 |
+| `API_INTERNAL_BASE_URL` | Web 容器内部访问 API 的地址，Compose 下用 `http://api:8080` |
+| `NEXT_PUBLIC_API_BASE_URL` | 浏览器访问 API 的地址，Compose 下用 `http://localhost:8080` |
+| `CLI_SYNC_INTERVAL_SECONDS` | CLI 轮询间隔 |
+| `CLI_SYNC_BATCH_SIZE` | CLI 批量上传条数 |
 
-```env
-API__PUBLIC_BASE_URL=https://你的-api-公网域名
-API__WEB_BASE_URL=https://你的-web-公网域名
-API__AUTO_PASSWORD_SALT=替换为私有随机盐值
-API__WEB_SESSION_TTL_HOURS=720
+## Web 登录
+
+Web 使用本地账号密码登录：
+
+- 用户名就是 `user_id`
+- 密码由服务端按 `SHA256(API__AUTO_PASSWORD_SALT:user_id)` 自动生成
+
+管理员可查询凭据：
+
+```bash
+curl http://localhost:8080/v1/admin/users/<user_id>/credentials
 ```
 
-说明：
+## 构建
 
-- 默认账号名使用 `user_id`。
-- 默认密码由服务端按 `API__AUTO_PASSWORD_SALT + user_id` 自动派生。
-- 登录接口为 `/v1/auth/web/login`，成功后 Web 会写入本地会话 cookie。
-- 管理员可以通过 `/v1/admin/users/{user_id}/credentials` 查询某个用户当前可用的自动生成账号密码。
+```bash
+cargo build -p api --release
+cargo build -p cli --release
+cd apps/web && corepack pnpm build
+```
 
-## 当前实现范围
+## 当前限制
 
-- CLI 已接入 `Codex` 和 `DeepSeek-TUI` adapter，以守护进程方式运行，支持 `start/stop/restart/status`；其余工具（Cursor、Claude Code、OpenCode）接口已预留。
-- API 已覆盖计划中的主要读写接口，并在内存仓库上提供分钟级聚合逻辑示意。
-- Web 已实现仪表盘、排行榜、个人页三大页面和筛选/表格/趋势展示。
-- 数据库 migration 已覆盖核心表、聚合表、奖励表和基础 seed 数据。
+- 当前 Web 能正常展示，但是否有数据取决于 CLI 是否已经上传真实事件
+- `Cursor`、`OpenCode` 适配器仍未完全稳定
+- 真实微信 OAuth、完整权限模型、更多生产化能力仍未完成

@@ -2,8 +2,11 @@ import "server-only";
 
 import { cookies } from "next/headers";
 
-const API_BASE_URL =
+const PUBLIC_API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
+
+const INTERNAL_API_BASE_URL =
+  process.env.API_INTERNAL_BASE_URL ?? PUBLIC_API_BASE_URL;
 
 export const SESSION_COOKIE = "token_session";
 
@@ -23,7 +26,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     return null;
   }
 
-  const response = await fetch(`${API_BASE_URL}/v1/auth/web/me`, {
+  const response = await fetch(`${INTERNAL_API_BASE_URL}/v1/auth/web/me`, {
     cache: "no-store",
     headers: {
       "x-session-token": token,
@@ -47,5 +50,5 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 }
 
 export function getApiBaseUrl(): string {
-  return API_BASE_URL;
+  return INTERNAL_API_BASE_URL;
 }

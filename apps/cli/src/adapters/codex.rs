@@ -104,12 +104,14 @@ pub fn resolve_log_dir(explicit: Option<PathBuf>) -> anyhow::Result<PathBuf> {
     if let Some(path) = explicit {
         return Ok(path);
     }
-    if let Ok(path) = std::env::var("CLI_CODEX_LOG_DIR") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return Ok(PathBuf::from(trimmed));
+
+    if let Ok(home) = std::env::var("HOME") {
+        let user_path = PathBuf::from(home).join(".codex/sessions");
+        if user_path.exists() {
+            return Ok(user_path);
         }
     }
+
     Ok(std::env::current_dir()?.join("sample-data/codex"))
 }
 

@@ -104,10 +104,23 @@ impl UsageEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthStartRequest {
+    pub device_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthStartResponse {
     pub device_id: String,
     pub login_url: String,
     pub poll_after_seconds: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bound_user: Option<AuthenticatedUser>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,6 +287,7 @@ pub struct MeOverviewResponse {
     pub generated_at: DateTime<Utc>,
     pub user_id: String,
     pub display_name: String,
+    pub team_name: Option<String>,
     pub total_tokens: u64,
     pub total_cost_usd: f64,
     pub request_count: usize,

@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { SESSION_COOKIE } from "@/lib/auth";
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
+import { getApiBaseUrl, SESSION_COOKIE } from "@/lib/auth";
 
 const clearCookieOptions = {
   httpOnly: true,
@@ -17,7 +14,7 @@ async function performLogout(request: NextRequest) {
   const sessionToken = request.cookies.get(SESSION_COOKIE)?.value;
 
   if (sessionToken) {
-    await fetch(`${API_BASE_URL}/v1/auth/web/logout`, {
+    await fetch(`${getApiBaseUrl()}/v1/auth/web/logout`, {
       method: "POST",
       headers: { "x-session-token": sessionToken },
       cache: "no-store",

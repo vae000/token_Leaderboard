@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use common::ToolKind;
 
-use crate::{adapters::codex, adapters::deepseek_tui, config::CliState, http::LeaderboardClient, sync::preview_pending};
+use crate::{
+    adapters::codex, adapters::deepseek_tui, config::CliState, http::LeaderboardClient,
+    sync::preview_pending,
+};
 
 pub async fn run_doctor(api_base_url: &str, log_dir: Option<PathBuf>) -> anyhow::Result<()> {
     let state = CliState::load()?;
