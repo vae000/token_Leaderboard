@@ -192,14 +192,39 @@ export default async function MePage({ searchParams }: MePageProps) {
             ))}
           </CardContent>
         </Card>
-        <SectionCard
-          title="奖励"
-          subtitle="数据库结果"
-          items={rewards.rewards.map((reward) => ({
-            label: reward.label,
-            value: `${reward.granted_at} · ${reward.description}`,
-          }))}
-        />
+        <Card>
+          <CardHeader>
+            <div>
+              <CardDescription>成就奖励</CardDescription>
+              <CardTitle>奖励</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {rewards.rewards.length === 0 ? (
+              <p className="text-sm leading-6 text-slate-500">暂无奖励</p>
+            ) : (
+              rewards.rewards.map((reward) => (
+                <div
+                  key={`${reward.label}-${reward.granted_at}`}
+                  className="flex items-center gap-3 rounded-2xl border border-sky-100 bg-white/65 px-4 py-3"
+                >
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-50 text-amber-500">
+                    <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-900 truncate">{reward.label}</p>
+                    <p className="text-xs text-slate-500 truncate">{reward.description}</p>
+                  </div>
+                  <span className="shrink-0 text-xs text-slate-400">
+                    {new Date(reward.granted_at).toLocaleDateString("zh-CN")}
+                  </span>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
       </section>
 
       <section className="two-column">
