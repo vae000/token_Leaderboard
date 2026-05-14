@@ -51,14 +51,19 @@ impl CliState {
     }
 }
 
-pub fn state_path() -> anyhow::Result<PathBuf> {
+/// 返回配置目录路径。
+pub fn state_dir() -> anyhow::Result<PathBuf> {
     if let Ok(dir) = std::env::var("LEADERBOARD_CONFIG_DIR") {
-        return Ok(PathBuf::from(dir).join("config.json"));
+        return Ok(PathBuf::from(dir));
     }
 
     let project_dirs = ProjectDirs::from("com", "token-leaderboard", "leaderboard")
         .context("failed to derive config directory")?;
-    Ok(project_dirs.config_dir().join("config.json"))
+    Ok(project_dirs.config_dir().to_path_buf())
+}
+
+pub fn state_path() -> anyhow::Result<PathBuf> {
+    Ok(state_dir()?.join("config.json"))
 }
 
 fn ensure_parent(path: &Path) -> anyhow::Result<()> {

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod adapters;
 mod auth;
 mod config;
@@ -5,21 +7,14 @@ mod diagnostics;
 mod http;
 mod sync;
 
-use std::path::PathBuf;
-
-use anyhow::Context;
 use clap::{Parser, Subcommand};
-use common::ToolKind;
 
 use crate::{
-    auth::{login, logout},
-    config::CliState,
-    diagnostics::run_doctor,
-    sync::{preview_pending, run_sync},
+    sync::{daemon_status, start_daemon, stop_daemon},
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "leaderboard", about = "Token leaderboard local collector")]
+#[command(name = "leaderboard", about = "Token leaderboard 本地采集守护进程")]
 struct Cli {
     #[arg(
         long,
@@ -29,31 +24,29 @@ struct Cli {
     api_base_url: String,
     #[command(subcommand)]
     command: Commands,
+    /// 隐藏参数：由 start 命令内部调用，启动守护进程循环
+    #[arg(long, hide = true)]
+    daemon: bool,
 }
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    Login {
-        #[arg(long, default_value = "u_demo")]
-        user_id: String,
-        #[arg(long, default_value = "Demo User")]
-        name: String,
+    /// 启动后台守护进程，自动扫描所有工具并持续监控
+    Start {
+        /// 监控轮询间隔（秒）
+        #[arg(long, env = "CLI_SYNC_INTERVAL_SECONDS", default_value_t = 60)]
+        interval_seconds: u64,
     },
-    Sync {
-        #[arg(long, default_value = "codex")]
-        tool: String,
-        #[arg(long)]
-        log_dir: Option<PathBuf>,
+    /// 停止后台守护进程
+    Stop,
+    /// 重启后台守护进程
+    Restart {
+        /// 监控轮询间隔（秒）
+        #[arg(long, env = "CLI_SYNC_INTERVAL_SECONDS", default_value_t = 60)]
+        interval_seconds: u64,
     },
-    Status {
-        #[arg(long)]
-        log_dir: Option<PathBuf>,
-    },
-    Logout,
-    Doctor {
-        #[arg(long)]
-        log_dir: Option<PathBuf>,
-    },
+    /// 查看守护进程状态
+    Status,
 }
 
 #[tokio::main]
@@ -61,61 +54,26 @@ async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     let cli = Cli::parse();
 
+    // 隐藏的守护进程模式：由 start 命令内部启动的子进程
+    if cli.daemon {
+        return sync::run_daemon(&cli.api_base_url).await;
+    }
+
     match cli.command {
-        Commands::Login { user_id, name } => {
-            login(&cli.api_base_url, &user_id, &name).await?;
+        Commands::Start { interval_seconds } => {
+            start_daemon(&cli.api_base_url, interval_seconds).await?;
         }
-        Commands::Sync { tool, log_dir } => {
-            let tool = parse_tool(&tool)?;
-            run_sync(&cli.api_base_url, tool, log_dir).await?;
+        Commands::Stop => {
+            stop_daemon()?;
         }
-        Commands::Status { log_dir } => {
-            let state = CliState::load()?;
-            let pending = preview_pending(ToolKind::Codex, &state, log_dir)
-                .await
-                .unwrap_or(0);
-            print_status(&state, pending);
+        Commands::Restart { interval_seconds } => {
+            stop_daemon().ok();
+            start_daemon(&cli.api_base_url, interval_seconds).await?;
         }
-        Commands::Logout => {
-            logout()?;
-        }
-        Commands::Doctor { log_dir } => {
-            run_doctor(&cli.api_base_url, log_dir).await?;
+        Commands::Status => {
+            daemon_status()?;
         }
     }
 
     Ok(())
-}
-
-fn parse_tool(raw: &str) -> anyhow::Result<ToolKind> {
-    raw.parse::<ToolKind>()
-        .map_err(|error| anyhow::anyhow!(error))
-        .with_context(|| format!("unsupported tool `{raw}`"))
-}
-
-fn print_status(state: &CliState, pending: usize) {
-    println!(
-        "user: {}",
-        state
-            .user_id
-            .clone()
-            .unwrap_or_else(|| "<not logged in>".into())
-    );
-    println!(
-        "name: {}",
-        state.display_name.clone().unwrap_or_else(|| "-".into())
-    );
-    println!(
-        "device_id: {}",
-        state.device_id.clone().unwrap_or_else(|| "-".into())
-    );
-    println!(
-        "last_sync_at: {}",
-        state
-            .last_sync_at
-            .map(|value| value.to_rfc3339())
-            .unwrap_or_else(|| "never".into())
-    );
-    println!("pending_events: {pending}");
-    println!("recognized_tools: codex");
 }
