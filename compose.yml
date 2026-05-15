@@ -32,7 +32,8 @@ services:
       API__DB_PASSWORD: "123456"
       API__DB_NAME: token
       API__DB_SCHEMA: token
-      API__CORS_ALLOW_ORIGIN: http://localhost:3000
+      API__CORS_ALLOW_ORIGIN: http://${HOST_IP}:3000
+      API__WEB_BASE_URL: http://${HOST_IP}:3000
       API__AUTO_PASSWORD_SALT: compose-local-salt
       API__REFRESH_MODEL_CATALOG_ON_STARTUP: "false"
     depends_on:
@@ -47,7 +48,7 @@ services:
       - "3000:3000"
     environment:
       API_INTERNAL_BASE_URL: http://api:8080
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      NEXT_PUBLIC_API_BASE_URL: http://${HOST_IP}:8080
     depends_on:
       - api
 

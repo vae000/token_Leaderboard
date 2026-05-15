@@ -20,14 +20,16 @@ docker compose up -d --build
 
 启动后访问：
 
-- Web: `http://localhost:3000`
-- API: `http://localhost:8080`
+- Web: `http://<HOST_IP>:3000`
+- API: `http://<HOST_IP>:8080`
 
 说明：
 
 - API 镜像编译时会内嵌 `db/migrations`，构建上下文必须是仓库根目录。
 - Web 容器内部通过 `API_INTERNAL_BASE_URL=http://api:8080` 访问 API。
-- 浏览器访问 API 使用 `NEXT_PUBLIC_API_BASE_URL=http://localhost:8080`。
+- `compose.yml` 统一使用 `HOST_IP` 组装公开地址。
+- 当前工作区 `.env` 已设置 `HOST_IP=192.168.21.97`，因此 Compose 下的 Web/API 对外地址分别为 `http://192.168.21.97:3000` 和 `http://192.168.21.97:8080`。
+- Web 登录/退出后的跳转地址会优先跟随请求头中的实际访问主机，不再固定回落到 `localhost`。
 
 ## 本地开发
 
@@ -90,10 +92,13 @@ corepack pnpm dev
 | `API__DB_HOST` / `API__DB_PORT` / `API__DB_USER` / `API__DB_PASSWORD` / `API__DB_NAME` | PostgreSQL 连接参数 |
 | `API__DATABASE_URL` | 完整数据库连接串，优先级高于拆分变量 |
 | `API__DB_SCHEMA` | schema，默认使用 `token` |
+| `HOST_IP` | 宿主机对外 IPv4，Compose 用它组装 Web/API 的公开地址 |
+| `API__CORS_ALLOW_ORIGIN` | API 允许的 Web 来源；当前 `.env` 已指向宿主机 IP 的 Web 地址 |
+| `API__PUBLIC_BASE_URL` | API 对外基址；当前 `.env` 已指向宿主机 IP |
 | `API__AUTO_PASSWORD_SALT` | Web 登录密码盐值 |
-| `API__WEB_BASE_URL` | Web 外部地址 |
+| `API__WEB_BASE_URL` | Web 外部地址；当前 `.env` 已指向宿主机 IP |
 | `API_INTERNAL_BASE_URL` | Web 容器内部访问 API 的地址，Compose 下用 `http://api:8080` |
-| `NEXT_PUBLIC_API_BASE_URL` | 浏览器访问 API 的地址，Compose 下用 `http://localhost:8080` |
+| `NEXT_PUBLIC_API_BASE_URL` | 浏览器访问 API 的地址；当前 `.env` 已指向宿主机 IP |
 | `CLI_SYNC_INTERVAL_SECONDS` | CLI 轮询间隔 |
 | `CLI_SYNC_BATCH_SIZE` | CLI 批量上传条数 |
 
@@ -117,6 +122,19 @@ cargo build -p api --release
 cargo build -p cli --release
 cd apps/web && corepack pnpm build
 ```
+
+如果要直接产出 CLI 二进制：
+
+```bash
+make dist
+```
+
+说明：
+
+- 仓库将 `release` profile 固定为 `codegen-units = 1`，用于规避当前 `rustc 1.95.0` 在本机上偶发的 LLVM codegen 崩溃。
+- `make dist` 默认一定构建 Linux 版本。
+- 只有在本机已安装 `x86_64-pc-windows-gnu` target 且存在 `x86_64-w64-mingw32-gcc` 时，`make dist` 才会附带构建 Windows 版本。
+- 如需显式构建 Windows 版本，可先执行 `rustup target add x86_64-pc-windows-gnu`，再安装 `gcc-mingw-w64-x86-64`，然后运行 `make build-windows`。
 
 ## 当前限制
 

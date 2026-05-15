@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getApiBaseUrl, SESSION_COOKIE } from "@/lib/auth";
+import { buildRedirectUrl, isSecureRequest } from "@/lib/request-url";
 
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
@@ -17,15 +18,15 @@ export async function POST(request: NextRequest) {
   }).catch(() => null);
 
   if (!response || !response.ok) {
-    return NextResponse.redirect(new URL("/login?error=1", request.url));
+    return NextResponse.redirect(buildRedirectUrl(request, "/login?error=1"));
   }
 
   const payload = (await response.json()) as { session_token: string };
-  const redirectResponse = NextResponse.redirect(new URL("/me", request.url));
+  const redirectResponse = NextResponse.redirect(buildRedirectUrl(request, "/me"));
   redirectResponse.cookies.set(SESSION_COOKIE, payload.session_token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest(request),
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });

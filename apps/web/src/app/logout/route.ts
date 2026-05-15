@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getApiBaseUrl, SESSION_COOKIE } from "@/lib/auth";
-
-const clearCookieOptions = {
-  httpOnly: true,
-  sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
-  path: "/",
-  maxAge: 0,
-};
+import { buildRedirectUrl, isSecureRequest } from "@/lib/request-url";
 
 async function performLogout(request: NextRequest) {
   const sessionToken = request.cookies.get(SESSION_COOKIE)?.value;
@@ -21,8 +14,14 @@ async function performLogout(request: NextRequest) {
     }).catch(() => null);
   }
 
-  const response = NextResponse.redirect(new URL("/", request.url));
-  response.cookies.set(SESSION_COOKIE, "", clearCookieOptions);
+  const response = NextResponse.redirect(buildRedirectUrl(request, "/"));
+  response.cookies.set(SESSION_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isSecureRequest(request),
+    path: "/",
+    maxAge: 0,
+  });
   return response;
 }
 

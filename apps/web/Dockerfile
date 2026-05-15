@@ -16,7 +16,7 @@ RUN npm config set registry https://registry.npmmirror.com \
 COPY apps/web/ .
 RUN CI=true pnpm build
 
-FROM node:22-alpine
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:22-alpine
 WORKDIR /app
 
 COPY --from=builder /app/.next ./.next
